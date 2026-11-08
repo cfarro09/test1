@@ -63,8 +63,11 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 if (mode == AppState.MODE_FORWARD &&
                     targetMatches() &&
                     !metaComboTriggered) {
-                    boolean ok = DexKeyboardImeService.sendCombo(
+                    boolean ok = DexKeyboardImeService.sendScancodeCombo(
                             KeyEvent.KEYCODE_ESCAPE,
+                            1,
+                            event.getDeviceId(),
+                            event.getSource(),
                             false,
                             false,
                             true,
@@ -109,8 +112,11 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                     AppState.appendLog(this,
                             "BLOCK GLOBAL WIN+" + KeyEvent.keyCodeToString(code));
                 } else if (mode == AppState.MODE_FORWARD) {
-                    boolean ok = DexKeyboardImeService.sendCombo(
+                    boolean ok = DexKeyboardImeService.sendScancodeCombo(
                             code,
+                            event.getScanCode(),
+                            event.getDeviceId(),
+                            event.getSource(),
                             event.isShiftPressed(),
                             event.isAltPressed(),
                             event.isCtrlPressed(),
@@ -142,15 +148,18 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 if (mode == AppState.MODE_BLOCK) {
                     AppState.appendLog(this, "BLOCK GLOBAL ALT+TAB step");
                 } else if (mode == AppState.MODE_FORWARD) {
-                    boolean ok = DexKeyboardImeService.sendCombo(
-                            KeyEvent.KEYCODE_PAGE_UP,
+                    boolean ok = DexKeyboardImeService.sendScancodeCombo(
+                            KeyEvent.KEYCODE_TAB,
+                            event.getScanCode(),
+                            event.getDeviceId(),
+                            event.getSource(),
                             false,
                             true,
                             false,
                             false
                     );
                     AppState.appendLog(this,
-                            "FORWARD ALT+TAB STEP -> ALT+PAGE_UP result=" + ok);
+                            "FORWARD ALT+TAB STEP -> physical ALT+TAB result=" + ok);
                 }
             }
             return true;
