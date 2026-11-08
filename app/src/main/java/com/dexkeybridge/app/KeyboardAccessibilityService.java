@@ -23,7 +23,8 @@ public class KeyboardAccessibilityService extends AccessibilityService {
             info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
             setServiceInfo(info);
         }
-        AppState.appendLog(this, "ACCESSIBILITY CONNECTED v7");
+        resetPhysicalState("SERVICE CONNECTED");
+        AppState.appendLog(this, "ACCESSIBILITY CONNECTED v9");
     }
 
     @Override
@@ -37,6 +38,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
+        resetPhysicalState("INTERRUPT");
         AppState.appendLog(this, "ACCESSIBILITY INTERRUPTED");
     }
 
@@ -45,17 +47,29 @@ public class KeyboardAccessibilityService extends AccessibilityService {
         if (event == null) return false;
         if (DexKeyboardImeService.shouldSuppressAccessibilityLoop()) return false;
 
-        updateDetection(event);
-        logInteresting(event);
-
         int code = event.getKeyCode();
         boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
         boolean up = event.getAction() == KeyEvent.ACTION_UP;
         int mode = AppState.getMode(this);
 
+        // Always heal stale internal state from Android's current metaState.
+        // If a non-META event says META=false, Win cannot still be physically held.
+        if (!isMetaKey(code) && !event.isMetaPressed() && metaPhysicalDown) {
+            metaPhysicalDown = false;
+            metaComboTriggered = false;
+            AppState.appendLog(this, "STATE HEAL: META -> false");
+        }
+        if (!isAltKey(code) && !event.isAltPressed() && altPhysicalDown) {
+            altPhysicalDown = false;
+            AppState.appendLog(this, "STATE HEAL: ALT -> false");
+        }
+
+        updateDetection(event);
+        logInteresting(event);
+
         boolean ownsNow = shouldConsumeNow();
 
-        if (code == KeyEvent.KEYCODE_META_LEFT || code == KeyEvent.KEYCODE_META_RIGHT) {
+        if (isMetaKey(code)) {
             if (down) {
                 metaPhysicalDown = true;
                 metaComboTriggered = false;
@@ -80,18 +94,20 @@ public class KeyboardAccessibilityService extends AccessibilityService {
             }
 
             if (ownsNow) {
-                AppState.appendLog(this, "CONSUME " + KeyEvent.keyCodeToString(code) +
-                        " mode=" + mode);
+                AppState.appendLog(this,
+                        "CONSUME " + KeyEvent.keyCodeToString(code) + " mode=" + mode);
                 return true;
             }
             return false;
         }
 
-        if (code == KeyEvent.KEYCODE_ALT_LEFT || code == KeyEvent.KEYCODE_ALT_RIGHT) {
+        if (isAltKey(code)) {
             if (down) altPhysicalDown = true;
             if (up) altPhysicalDown = false;
 
-            if (ownsNow && (mode == AppState.MODE_BLOCK || altPhysicalDown || up)) {
+            // When Windows App is target, always consume physical Alt so DeX never
+            // gets a chance to build its own Alt+Tab sequence.
+            if (ownsNow) {
                 AppState.appendLog(this, "CONSUME ALT sequence");
                 return true;
             }
@@ -102,9 +118,8 @@ public class KeyboardAccessibilityService extends AccessibilityService {
             return false;
         }
 
-        // Any sequence started with Win/Meta belongs to the Windows remote.
-        // Forward every non-modifier key while Win is physically held.
-        if (metaPhysicalDown && !isModifier(code)) {
+        // Everything started with physical Win belongs to the remote Windows session.
+        if ((metaPhysicalDown || event.isMetaPressed()) && !isModifier(code)) {
             metaComboTriggered = true;
 
             if (down && event.getRepeatCount() == 0) {
@@ -133,24 +148,25 @@ public class KeyboardAccessibilityService extends AccessibilityService {
             return true;
         }
 
-        // Keep all modifier transitions owned while a Win sequence is active.
-        if (metaPhysicalDown && isModifier(code)) {
+        if ((metaPhysicalDown || event.isMetaPressed()) && isModifier(code)) {
             AppState.appendLog(this,
                     "CONSUME modifier during WIN sequence: " +
                     KeyEvent.keyCodeToString(code));
             return true;
         }
 
-        // Alt+Tab, Alt+Tab+Tab, Alt+Tab+Tab+Tab...
-        // Keep the entire Alt sequence inside the remote session.
-        if (altPhysicalDown && code == KeyEvent.KEYCODE_TAB) {
+        // Repeated Alt+Tab: every physical TAB becomes one remote Alt+PageUp step.
+        // This is the RDP-safe equivalent and avoids injecting Alt+Tab back into DeX.
+        if ((altPhysicalDown || event.isAltPressed()) &&
+            code == KeyEvent.KEYCODE_TAB) {
+
             if (down && event.getRepeatCount() == 0) {
                 if (mode == AppState.MODE_BLOCK) {
                     AppState.appendLog(this, "BLOCK GLOBAL ALT+TAB step");
                 } else if (mode == AppState.MODE_FORWARD) {
                     boolean ok = DexKeyboardImeService.sendScancodeCombo(
-                            KeyEvent.KEYCODE_TAB,
-                            event.getScanCode(),
+                            KeyEvent.KEYCODE_PAGE_UP,
+                            73,
                             event.getDeviceId(),
                             event.getSource(),
                             false,
@@ -159,13 +175,20 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                             false
                     );
                     AppState.appendLog(this,
-                            "FORWARD ALT+TAB STEP -> physical ALT+TAB result=" + ok);
+                            "FORWARD ALT+TAB STEP -> ALT+PAGE_UP result=" + ok);
                 }
             }
             return true;
         }
 
         return false;
+    }
+
+    private void resetPhysicalState(String reason) {
+        metaPhysicalDown = false;
+        metaComboTriggered = false;
+        altPhysicalDown = false;
+        AppState.appendLog(this, "STATE RESET: " + reason);
     }
 
     private boolean shouldConsumeNow() {
@@ -186,9 +209,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     private void updateDetection(KeyEvent event) {
         int code = event.getKeyCode();
 
-        if (code == KeyEvent.KEYCODE_META_LEFT ||
-            code == KeyEvent.KEYCODE_META_RIGHT ||
-            event.isMetaPressed()) {
+        if (isMetaKey(code) || event.isMetaPressed()) {
             AppState.setMetaDetected(this, true);
         }
 
@@ -197,13 +218,21 @@ public class KeyboardAccessibilityService extends AccessibilityService {
         }
     }
 
-    private boolean isModifier(int code) {
+    private boolean isMetaKey(int code) {
         return code == KeyEvent.KEYCODE_META_LEFT ||
-               code == KeyEvent.KEYCODE_META_RIGHT ||
+               code == KeyEvent.KEYCODE_META_RIGHT;
+    }
+
+    private boolean isAltKey(int code) {
+        return code == KeyEvent.KEYCODE_ALT_LEFT ||
+               code == KeyEvent.KEYCODE_ALT_RIGHT;
+    }
+
+    private boolean isModifier(int code) {
+        return isMetaKey(code) ||
+               isAltKey(code) ||
                code == KeyEvent.KEYCODE_SHIFT_LEFT ||
                code == KeyEvent.KEYCODE_SHIFT_RIGHT ||
-               code == KeyEvent.KEYCODE_ALT_LEFT ||
-               code == KeyEvent.KEYCODE_ALT_RIGHT ||
                code == KeyEvent.KEYCODE_CTRL_LEFT ||
                code == KeyEvent.KEYCODE_CTRL_RIGHT;
     }
