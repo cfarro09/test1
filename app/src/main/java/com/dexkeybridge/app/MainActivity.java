@@ -3,29 +3,36 @@ package com.dexkeybridge.app;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
-import android.view.InputDevice;
-import android.view.KeyEvent;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.text.TextUtils;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-
 public class MainActivity extends Activity {
-    private final StringBuilder log = new StringBuilder();
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private TextView serviceStatus;
     private TextView metaStatus;
     private TextView altTabStatus;
-    private TextView lastEvent;
     private TextView logView;
-    private boolean metaSeen = false;
-    private boolean altTabSeen = false;
+
+    private final Runnable refresher = new Runnable() {
+        @Override
+        public void run() {
+            refresh();
+            handler.postDelayed(this, 500);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,48 +44,51 @@ public class MainActivity extends Activity {
         root.setPadding(dp(18), dp(18), dp(18), dp(24));
         scroll.addView(root);
 
-        TextView title = text("DexKeyBridge Lite", 28, true);
+        TextView title = text("DexKeyBridge Diagnostic v2", 26, true);
         root.addView(title);
 
         TextView subtitle = text(
-                "Diagnóstico local de teclado físico para Samsung DeX.\n" +
-                "No solicita Accesibilidad, IME, Internet ni permisos especiales.",
-                14, false);
+            "Prueba global de teclado para Samsung DeX.\n" +
+            "Solo usa AccessibilityService para observar eventos.\n" +
+            "No inyecta teclas, no usa Internet y nunca consume los eventos.",
+            14, false
+        );
         subtitle.setTextColor(Color.LTGRAY);
         subtitle.setPadding(0, dp(6), 0, dp(16));
         root.addView(subtitle);
 
+        serviceStatus = text("", 17, true);
         metaStatus = text("", 18, true);
         altTabStatus = text("", 18, true);
-        lastEvent = text("Último evento: <ninguno>", 14, false);
-        lastEvent.setTypeface(Typeface.MONOSPACE);
-
+        root.addView(serviceStatus);
         root.addView(metaStatus);
         root.addView(altTabStatus);
-        root.addView(lastEvent);
+
+        Button settings = new Button(this);
+        settings.setText("Activar servicio de Accesibilidad");
+        settings.setAllCaps(false);
+        settings.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(settings);
 
         TextView instructions = text(
-                "\nPrueba en DeX, con esta app enfocada:\n" +
-                "• tecla Windows / Meta\n" +
-                "• Win + E\n" +
-                "• Win + R\n" +
-                "• Alt + Tab\n" +
-                "• Ctrl, Alt, Shift, Esc\n\n" +
-                "Si META cambia a PASS, Samsung está entregando la tecla Windows a una app Android normal.\n" +
-                "Si no cambia, DeX probablemente la consume antes.",
-                14, false);
+            "\nDespués de activarlo, puedes salir de esta app y probar en cualquier lugar de DeX:\n\n" +
+            "1. Win sola\n" +
+            "2. Win + E\n" +
+            "3. Win + R\n" +
+            "4. Alt + Tab\n\n" +
+            "Luego vuelve aquí. Si Android entrega esos eventos al servicio, verás PASS y el log correspondiente.",
+            14, false
+        );
         root.addView(instructions);
 
         Button clear = new Button(this);
         clear.setText("Limpiar diagnóstico");
         clear.setAllCaps(false);
         clear.setOnClickListener(v -> {
-            log.setLength(0);
-            metaSeen = false;
-            altTabSeen = false;
-            lastEvent.setText("Último evento: <ninguno>");
-            refreshStatus();
-            refreshLog();
+            AppState.clearLog(this);
+            AppState.setMetaDetected(this, false);
+            AppState.setAltTabDetected(this, false);
+            refresh();
         });
         root.addView(clear);
 
@@ -88,7 +98,7 @@ public class MainActivity extends Activity {
         copy.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("DexKeyBridge Lite", log.toString()));
+                cm.setPrimaryClip(ClipData.newPlainText("DexKeyBridge Diagnostic v2", AppState.getLog(this)));
             }
         });
         root.addView(copy);
@@ -99,84 +109,55 @@ public class MainActivity extends Activity {
         logView.setPadding(0, dp(12), 0, 0);
         root.addView(logView);
 
-        refreshStatus();
         setContentView(scroll);
     }
 
     @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        record(event);
-        // Important: do not consume anything in Lite mode.
-        return super.dispatchKeyEvent(event);
+    protected void onResume() {
+        super.onResume();
+        handler.post(refresher);
     }
 
-    private void record(KeyEvent e) {
-        if (e == null) return;
-
-        int code = e.getKeyCode();
-
-        if (code == KeyEvent.KEYCODE_META_LEFT ||
-                code == KeyEvent.KEYCODE_META_RIGHT ||
-                e.isMetaPressed()) {
-            metaSeen = true;
-        }
-
-        if (code == KeyEvent.KEYCODE_TAB && e.isAltPressed()) {
-            altTabSeen = true;
-        }
-
-        InputDevice d = InputDevice.getDevice(e.getDeviceId());
-        String deviceName = d == null ? "unknown" : d.getName();
-        int vendor = d == null ? -1 : d.getVendorId();
-        int product = d == null ? -1 : d.getProductId();
-
-        String action;
-        if (e.getAction() == KeyEvent.ACTION_DOWN) action = "DOWN";
-        else if (e.getAction() == KeyEvent.ACTION_UP) action = "UP";
-        else action = String.valueOf(e.getAction());
-
-        String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
-
-        String line =
-                time +
-                " " + action +
-                " key=" + KeyEvent.keyCodeToString(code) +
-                " code=" + code +
-                " scan=" + e.getScanCode() +
-                " meta=0x" + Integer.toHexString(e.getMetaState()) +
-                " [META=" + e.isMetaPressed() +
-                " CTRL=" + e.isCtrlPressed() +
-                " ALT=" + e.isAltPressed() +
-                " SHIFT=" + e.isShiftPressed() + "]" +
-                " repeat=" + e.getRepeatCount() +
-                " deviceId=" + e.getDeviceId() +
-                " device=\"" + deviceName + "\"" +
-                " vendor=" + vendor +
-                " product=" + product +
-                " source=0x" + Integer.toHexString(e.getSource());
-
-        if (log.length() > 30000) {
-            log.delete(0, 12000);
-        }
-        log.append(line).append('\n');
-
-        runOnUiThread(() -> {
-            lastEvent.setText("Último evento:\n" + line);
-            refreshStatus();
-            refreshLog();
-        });
+    @Override
+    protected void onPause() {
+        super.onPause();
+        handler.removeCallbacks(refresher);
     }
 
-    private void refreshStatus() {
-        metaStatus.setText("META / WIN: " + (metaSeen ? "PASS" : "NOT SEEN"));
-        metaStatus.setTextColor(metaSeen ? Color.GREEN : Color.YELLOW);
+    private void refresh() {
+        boolean enabled = isServiceEnabled();
+        boolean meta = AppState.isMetaDetected(this);
+        boolean altTab = AppState.isAltTabDetected(this);
 
-        altTabStatus.setText("ALT + TAB: " + (altTabSeen ? "PASS" : "NOT SEEN"));
-        altTabStatus.setTextColor(altTabSeen ? Color.GREEN : Color.YELLOW);
+        serviceStatus.setText("Accessibility: " + (enabled ? "ENABLED" : "DISABLED"));
+        serviceStatus.setTextColor(enabled ? Color.GREEN : Color.YELLOW);
+
+        metaStatus.setText("META / WIN GLOBAL: " + (meta ? "PASS" : "NOT SEEN"));
+        metaStatus.setTextColor(meta ? Color.GREEN : Color.YELLOW);
+
+        altTabStatus.setText("ALT + TAB GLOBAL: " + (altTab ? "PASS" : "NOT SEEN"));
+        altTabStatus.setTextColor(altTab ? Color.GREEN : Color.YELLOW);
+
+        logView.setText(AppState.getLog(this));
     }
 
-    private void refreshLog() {
-        logView.setText(log.toString());
+    private boolean isServiceEnabled() {
+        String enabled = Settings.Secure.getString(
+            getContentResolver(),
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        );
+
+        if (enabled == null) return false;
+
+        ComponentName me = new ComponentName(this, KeyboardAccessibilityService.class);
+
+        TextUtils.SimpleStringSplitter splitter = new TextUtils.SimpleStringSplitter(':');
+        splitter.setString(enabled);
+        while (splitter.hasNext()) {
+            ComponentName cn = ComponentName.unflattenFromString(splitter.next());
+            if (me.equals(cn)) return true;
+        }
+        return false;
     }
 
     private TextView text(String value, int sp, boolean bold) {
