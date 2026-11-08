@@ -13,8 +13,12 @@ import java.util.Locale;
 public class KeyboardAccessibilityService extends AccessibilityService {
     private boolean metaPhysicalDown = false;
     private boolean metaComboTriggered = false;
+
     private boolean altPhysicalDown = false;
     private boolean altSequenceOwned = false;
+    private boolean remoteAltDown = false;
+    private int altDeviceId = KeyEvent.KEYCODE_UNKNOWN;
+    private int altSource = InputDevice.SOURCE_KEYBOARD;
 
     @Override
     protected void onServiceConnected() {
@@ -25,7 +29,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
             setServiceInfo(info);
         }
         resetPhysicalState("SERVICE CONNECTED");
-        AppState.appendLog(this, "ACCESSIBILITY CONNECTED v10");
+        AppState.appendLog(this, "ACCESSIBILITY CONNECTED v11");
     }
 
     @Override
@@ -39,6 +43,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
+        releaseRemoteAltIfNeeded("INTERRUPT");
         resetPhysicalState("INTERRUPT");
         AppState.appendLog(this, "ACCESSIBILITY INTERRUPTED");
     }
@@ -46,7 +51,10 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
         if (event == null) return false;
-        if (DexKeyboardImeService.shouldSuppressAccessibilityLoop()) return false;
+
+        if (DexKeyboardImeService.isBridgeInjectedEvent(event)) {
+            return false;
+        }
 
         int code = event.getKeyCode();
         boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
@@ -68,18 +76,15 @@ public class KeyboardAccessibilityService extends AccessibilityService {
         logInteresting(event);
 
         boolean targetNow = targetMatches();
-        boolean ownsNow = mode == AppState.MODE_BLOCK ||
-                (mode == AppState.MODE_FORWARD && targetNow) ||
-                altSequenceOwned;
+        boolean forwardTarget = mode == AppState.MODE_FORWARD && targetNow;
+        boolean blockMode = mode == AppState.MODE_BLOCK;
 
         if (isMetaKey(code)) {
             if (down) {
                 metaPhysicalDown = true;
                 metaComboTriggered = false;
             } else if (up) {
-                if (mode == AppState.MODE_FORWARD &&
-                    targetNow &&
-                    !metaComboTriggered) {
+                if (forwardTarget && !metaComboTriggered) {
                     boolean ok = DexKeyboardImeService.sendScancodeCombo(
                             KeyEvent.KEYCODE_ESCAPE,
                             1,
@@ -96,7 +101,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 metaComboTriggered = false;
             }
 
-            if (ownsNow) {
+            if (blockMode || forwardTarget) {
                 AppState.appendLog(this,
                         "CONSUME " + KeyEvent.keyCodeToString(code) + " mode=" + mode);
                 return true;
@@ -107,97 +112,133 @@ public class KeyboardAccessibilityService extends AccessibilityService {
         if (isAltKey(code)) {
             if (down) {
                 altPhysicalDown = true;
-                if (targetNow && mode == AppState.MODE_FORWARD) {
+                altDeviceId = event.getDeviceId();
+                altSource = event.getSource();
+
+                if (forwardTarget && !altSequenceOwned) {
                     altSequenceOwned = true;
-                    AppState.appendLog(this, "ALT SEQUENCE OWNED");
+                    remoteAltDown = DexKeyboardImeService.sendModifierEvent(
+                            KeyEvent.ACTION_DOWN,
+                            KeyEvent.KEYCODE_ALT_LEFT,
+                            56,
+                            altDeviceId,
+                            altSource,
+                            KeyEvent.META_ALT_ON
+                    );
+                    AppState.appendLog(this,
+                            "ALT SEQUENCE OWNED remoteAltDown=" + remoteAltDown);
                 }
             }
 
             if (up) {
                 altPhysicalDown = false;
-                if (altSequenceOwned) {
+                if (altSequenceOwned || remoteAltDown) {
+                    releaseRemoteAltIfNeeded("PHYSICAL ALT UP");
                     AppState.appendLog(this, "ALT SEQUENCE RELEASED");
                 }
                 altSequenceOwned = false;
             }
 
-            if (ownsNow || altSequenceOwned) {
+            if (blockMode || forwardTarget || altSequenceOwned || remoteAltDown) {
                 AppState.appendLog(this, "CONSUME ALT sequence");
                 return true;
             }
             return false;
         }
 
-        if (!ownsNow) {
-            return false;
-        }
-
-        // Everything started with Win stays unchanged: this path already works.
         if ((metaPhysicalDown || event.isMetaPressed()) && !isModifier(code)) {
             metaComboTriggered = true;
 
-            if (down && event.getRepeatCount() == 0) {
-                if (mode == AppState.MODE_BLOCK) {
-                    AppState.appendLog(this,
-                            "BLOCK GLOBAL WIN+" + KeyEvent.keyCodeToString(code));
-                } else if (mode == AppState.MODE_FORWARD) {
-                    boolean ok = DexKeyboardImeService.sendScancodeCombo(
-                            code,
-                            event.getScanCode(),
-                            event.getDeviceId(),
-                            event.getSource(),
-                            event.isShiftPressed(),
-                            event.isAltPressed(),
-                            event.isCtrlPressed(),
-                            true
-                    );
-                    AppState.appendLog(this,
-                            "FORWARD WIN+" + KeyEvent.keyCodeToString(code) +
-                            " shift=" + event.isShiftPressed() +
-                            " alt=" + event.isAltPressed() +
-                            " ctrl=" + event.isCtrlPressed() +
-                            " result=" + ok);
+            if (blockMode || forwardTarget) {
+                if (down && event.getRepeatCount() == 0) {
+                    if (blockMode) {
+                        AppState.appendLog(this,
+                                "BLOCK GLOBAL WIN+" + KeyEvent.keyCodeToString(code));
+                    } else {
+                        boolean ok = DexKeyboardImeService.sendScancodeCombo(
+                                code,
+                                event.getScanCode(),
+                                event.getDeviceId(),
+                                event.getSource(),
+                                event.isShiftPressed(),
+                                event.isAltPressed(),
+                                event.isCtrlPressed(),
+                                true
+                        );
+                        AppState.appendLog(this,
+                                "FORWARD WIN+" + KeyEvent.keyCodeToString(code) +
+                                " shift=" + event.isShiftPressed() +
+                                " alt=" + event.isAltPressed() +
+                                " ctrl=" + event.isCtrlPressed() +
+                                " result=" + ok);
+                    }
                 }
+                return true;
             }
-            return true;
         }
 
         if ((metaPhysicalDown || event.isMetaPressed()) && isModifier(code)) {
-            AppState.appendLog(this,
-                    "CONSUME modifier during WIN sequence: " +
-                    KeyEvent.keyCodeToString(code));
+            if (blockMode || forwardTarget) {
+                AppState.appendLog(this,
+                        "CONSUME modifier during WIN sequence: " +
+                        KeyEvent.keyCodeToString(code));
+                return true;
+            }
+        }
+
+        if (altSequenceOwned && !isModifier(code)) {
+            if (down && event.getRepeatCount() == 0) {
+                int remoteMeta = KeyEvent.META_ALT_ON;
+                if (event.isShiftPressed()) remoteMeta |= KeyEvent.META_SHIFT_ON;
+                if (event.isCtrlPressed()) remoteMeta |= KeyEvent.META_CTRL_ON;
+
+                boolean ok = DexKeyboardImeService.sendKeyPairWithMeta(
+                        code,
+                        event.getScanCode(),
+                        event.getDeviceId(),
+                        event.getSource(),
+                        remoteMeta
+                );
+
+                if (code == KeyEvent.KEYCODE_TAB) {
+                    AppState.appendLog(this,
+                            "FORWARD ALT+TAB STEP (held ALT) result=" + ok);
+                } else {
+                    AppState.appendLog(this,
+                            "FORWARD ALT+" + KeyEvent.keyCodeToString(code) +
+                            " (held ALT) result=" + ok);
+                }
+            } else if (up) {
+                AppState.appendLog(this,
+                        "CONSUME " + KeyEvent.keyCodeToString(code) +
+                        " UP inside ALT sequence");
+            }
             return true;
         }
 
-        // Alt+Tab sequence: keep consuming every Tab DOWN and UP until Alt is released.
-        // Now that stale META is healed, forward a clean physical Alt+Tab step.
-        if ((altPhysicalDown || altSequenceOwned || event.isAltPressed()) &&
-            code == KeyEvent.KEYCODE_TAB) {
-
-            if (down && event.getRepeatCount() == 0) {
-                if (mode == AppState.MODE_BLOCK) {
-                    AppState.appendLog(this, "BLOCK GLOBAL ALT+TAB step");
-                } else if (mode == AppState.MODE_FORWARD) {
-                    boolean ok = DexKeyboardImeService.sendScancodeCombo(
-                            KeyEvent.KEYCODE_TAB,
-                            event.getScanCode(),
-                            event.getDeviceId(),
-                            event.getSource(),
-                            false,
-                            true,
-                            false,
-                            false
-                    );
-                    AppState.appendLog(this,
-                            "FORWARD ALT+TAB STEP -> PHYSICAL ALT+TAB result=" + ok);
-                }
-            } else if (up) {
-                AppState.appendLog(this, "CONSUME TAB UP inside ALT sequence");
-            }
+        if (blockMode && (event.isAltPressed() || altPhysicalDown)) {
+            AppState.appendLog(this,
+                    "BLOCK GLOBAL ALT+" + KeyEvent.keyCodeToString(code));
             return true;
         }
 
         return false;
+    }
+
+    private void releaseRemoteAltIfNeeded(String reason) {
+        if (!remoteAltDown) return;
+
+        boolean ok = DexKeyboardImeService.sendModifierEvent(
+                KeyEvent.ACTION_UP,
+                KeyEvent.KEYCODE_ALT_LEFT,
+                56,
+                altDeviceId,
+                altSource,
+                0
+        );
+        AppState.appendLog(this,
+                "REMOTE ALT RELEASE reason=" + reason + " result=" + ok);
+        remoteAltDown = false;
     }
 
     private void resetPhysicalState(String reason) {
@@ -205,6 +246,9 @@ public class KeyboardAccessibilityService extends AccessibilityService {
         metaComboTriggered = false;
         altPhysicalDown = false;
         altSequenceOwned = false;
+        remoteAltDown = false;
+        altDeviceId = KeyEvent.KEYCODE_UNKNOWN;
+        altSource = InputDevice.SOURCE_KEYBOARD;
         AppState.appendLog(this, "STATE RESET: " + reason);
     }
 
@@ -219,11 +263,9 @@ public class KeyboardAccessibilityService extends AccessibilityService {
 
     private void updateDetection(KeyEvent event) {
         int code = event.getKeyCode();
-
         if (isMetaKey(code) || event.isMetaPressed()) {
             AppState.setMetaDetected(this, true);
         }
-
         if (code == KeyEvent.KEYCODE_TAB && event.isAltPressed()) {
             AppState.setAltTabDetected(this, true);
         }
@@ -253,6 +295,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
         boolean interesting =
                 isModifier(c) ||
                 c == KeyEvent.KEYCODE_TAB ||
+                c == KeyEvent.KEYCODE_F4 ||
                 e.isMetaPressed() ||
                 e.isAltPressed() ||
                 e.isCtrlPressed();
@@ -289,6 +332,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 " winPhysical=" + metaPhysicalDown +
                 " altPhysical=" + altPhysicalDown +
                 " altOwned=" + altSequenceOwned +
+                " remoteAlt=" + remoteAltDown +
                 " device=\"" + device + "\"");
     }
 }
