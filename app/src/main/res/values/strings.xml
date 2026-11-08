@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">DexKeyBridge Diagnostic v2</string>
-    <string name="accessibility_service_description">Diagnostic service that checks whether Samsung DeX exposes Win/Meta and Alt+Tab key events. It does not inject keys and does not use Internet.</string>
+    <string name="accessibility_service_description">Intercepts physical keyboard shortcuts in Samsung DeX so they can be tested and optionally forwarded to Microsoft Windows App. No Internet access.</string>
+    <string name="ime_name">DexKeyBridge Keyboard Bridge</string>
 </resources>

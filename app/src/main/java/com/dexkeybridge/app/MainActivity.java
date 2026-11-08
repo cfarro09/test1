@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -21,9 +22,8 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    private TextView serviceStatus;
-    private TextView metaStatus;
-    private TextView altTabStatus;
+    private TextView status;
+    private TextView modeStatus;
     private TextView logView;
 
     private final Runnable refresher = new Runnable() {
@@ -48,57 +48,104 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = text(
-            "Prueba global de teclado para Samsung DeX.\n" +
-            "Solo usa AccessibilityService para observar eventos.\n" +
-            "No inyecta teclas, no usa Internet y nunca consume los eventos.",
-            14, false
+                "v3 experimental — misma app.\n" +
+                "Intercepta atajos del K380s solo cuando Microsoft Windows App está al frente.",
+                14,
+                false
         );
         subtitle.setTextColor(Color.LTGRAY);
-        subtitle.setPadding(0, dp(6), 0, dp(16));
+        subtitle.setPadding(0, dp(6), 0, dp(14));
         root.addView(subtitle);
 
-        serviceStatus = text("", 17, true);
-        metaStatus = text("", 18, true);
-        altTabStatus = text("", 18, true);
-        root.addView(serviceStatus);
-        root.addView(metaStatus);
-        root.addView(altTabStatus);
+        status = text("", 14, false);
+        status.setTypeface(Typeface.MONOSPACE);
+        root.addView(status);
 
-        Button settings = new Button(this);
-        settings.setText("Activar servicio de Accesibilidad");
-        settings.setAllCaps(false);
-        settings.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        root.addView(settings);
+        modeStatus = text("", 18, true);
+        modeStatus.setPadding(0, dp(12), 0, dp(8));
+        root.addView(modeStatus);
+
+        Button observe = button("Modo 1: OBSERVAR (no bloquea nada)");
+        observe.setOnClickListener(v -> {
+            AppState.setMode(this, AppState.MODE_OBSERVE);
+            refresh();
+        });
+        root.addView(observe);
+
+        Button block = button("Modo 2: BLOQUEAR DEX (prueba)");
+        block.setOnClickListener(v -> {
+            AppState.setMode(this, AppState.MODE_BLOCK);
+            refresh();
+        });
+        root.addView(block);
+
+        Button forward = button("Modo 3: ENVIAR A WINDOWS (experimental)");
+        forward.setOnClickListener(v -> {
+            AppState.setMode(this, AppState.MODE_FORWARD);
+            refresh();
+        });
+        root.addView(forward);
+
+        Button accessibility = button("Abrir ajustes de Accesibilidad");
+        accessibility.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accessibility);
+
+        Button imeSettings = button("Habilitar DexKeyBridge Keyboard Bridge");
+        imeSettings.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)));
+        root.addView(imeSettings);
+
+        Button imePicker = button("Seleccionar DexKeyBridge como teclado actual");
+        imePicker.setOnClickListener(v -> {
+            InputMethodManager imm =
+                    (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showInputMethodPicker();
+        });
+        root.addView(imePicker);
+
+        Button openWindows = button("Abrir Microsoft Windows App");
+        openWindows.setOnClickListener(v -> {
+            Intent launch = getPackageManager().getLaunchIntentForPackage(AppState.WINDOWS_APP_PACKAGE);
+            if (launch != null) {
+                startActivity(launch);
+            }
+        });
+        root.addView(openWindows);
 
         TextView instructions = text(
-            "\nDespués de activarlo, puedes salir de esta app y probar en cualquier lugar de DeX:\n\n" +
-            "1. Win sola\n" +
-            "2. Win + E\n" +
-            "3. Win + R\n" +
-            "4. Alt + Tab\n\n" +
-            "Luego vuelve aquí. Si Android entrega esos eventos al servicio, verás PASS y el log correspondiente.",
-            14, false
+                "\nPRUEBA A — BLOQUEAR DEX\n" +
+                "1. Selecciona BLOQUEAR DEX.\n" +
+                "2. Abre Windows App y entra a tu PC.\n" +
+                "3. Prueba Win, Win+E y Alt+Tab.\n" +
+                "4. DeX no debería ejecutar esos atajos.\n\n" +
+                "PRUEBA B — ENVIAR A WINDOWS\n" +
+                "1. Habilita y selecciona DexKeyBridge Keyboard Bridge.\n" +
+                "2. Selecciona ENVIAR A WINDOWS.\n" +
+                "3. En Windows App prueba Win+E y Alt+Tab.\n" +
+                "4. Win+E intenta llegar como Win+E; Alt+Tab se envía como Alt+PageUp.\n\n" +
+                "Si InputConnection sale UNAVAILABLE, Android no nos está dando un canal público de inyección hacia Windows App.",
+                14,
+                false
         );
         root.addView(instructions);
 
-        Button clear = new Button(this);
-        clear.setText("Limpiar diagnóstico");
-        clear.setAllCaps(false);
+        Button clear = button("Limpiar log");
         clear.setOnClickListener(v -> {
             AppState.clearLog(this);
-            AppState.setMetaDetected(this, false);
-            AppState.setAltTabDetected(this, false);
+            AppState.setLastInjection(this, "NOT TESTED");
             refresh();
         });
         root.addView(clear);
 
-        Button copy = new Button(this);
-        copy.setText("Copiar log");
-        copy.setAllCaps(false);
+        Button copy = button("Copiar log");
         copy.setOnClickListener(v -> {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipboardManager cm =
+                    (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("DexKeyBridge Diagnostic v2", AppState.getLog(this)));
+                cm.setPrimaryClip(
+                        ClipData.newPlainText("DexKeyBridge log", AppState.getLog(this))
+                );
             }
         });
         root.addView(copy);
@@ -125,39 +172,62 @@ public class MainActivity extends Activity {
     }
 
     private void refresh() {
-        boolean enabled = isServiceEnabled();
-        boolean meta = AppState.isMetaDetected(this);
-        boolean altTab = AppState.isAltTabDetected(this);
+        int mode = AppState.getMode(this);
+        String modeName =
+                mode == AppState.MODE_BLOCK ? "BLOQUEAR DEX" :
+                mode == AppState.MODE_FORWARD ? "ENVIAR A WINDOWS" :
+                "OBSERVAR";
 
-        serviceStatus.setText("Accessibility: " + (enabled ? "ENABLED" : "DISABLED"));
-        serviceStatus.setTextColor(enabled ? Color.GREEN : Color.YELLOW);
+        modeStatus.setText("MODO: " + modeName);
+        modeStatus.setTextColor(
+                mode == AppState.MODE_FORWARD ? Color.GREEN :
+                mode == AppState.MODE_BLOCK ? Color.YELLOW :
+                Color.LTGRAY
+        );
 
-        metaStatus.setText("META / WIN GLOBAL: " + (meta ? "PASS" : "NOT SEEN"));
-        metaStatus.setTextColor(meta ? Color.GREEN : Color.YELLOW);
-
-        altTabStatus.setText("ALT + TAB GLOBAL: " + (altTab ? "PASS" : "NOT SEEN"));
-        altTabStatus.setTextColor(altTab ? Color.GREEN : Color.YELLOW);
+        status.setText(
+                "Accessibility: " + (isAccessibilityEnabled() ? "ENABLED" : "DISABLED") + "\n" +
+                "IME service:    " + (DexKeyboardImeService.isServiceAlive() ? "ALIVE" : "NOT ACTIVE") + "\n" +
+                "InputConnection:" + (DexKeyboardImeService.hasInputConnection() ? " AVAILABLE" : " UNAVAILABLE") + "\n" +
+                "Foreground:     " + empty(AppState.getForeground(this)) + "\n" +
+                "Target:         " + AppState.WINDOWS_APP_PACKAGE + "\n" +
+                "META detected:  " + (AppState.isMetaDetected(this) ? "YES" : "NO") + "\n" +
+                "Alt+Tab seen:   " + (AppState.isAltTabDetected(this) ? "YES" : "NO") + "\n" +
+                "Last injection: " + AppState.getLastInjection(this)
+        );
 
         logView.setText(AppState.getLog(this));
     }
 
-    private boolean isServiceEnabled() {
+    private boolean isAccessibilityEnabled() {
         String enabled = Settings.Secure.getString(
-            getContentResolver(),
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         );
 
         if (enabled == null) return false;
 
         ComponentName me = new ComponentName(this, KeyboardAccessibilityService.class);
-
         TextUtils.SimpleStringSplitter splitter = new TextUtils.SimpleStringSplitter(':');
         splitter.setString(enabled);
+
         while (splitter.hasNext()) {
             ComponentName cn = ComponentName.unflattenFromString(splitter.next());
             if (me.equals(cn)) return true;
         }
+
         return false;
+    }
+
+    private String empty(String s) {
+        return s == null || s.isEmpty() ? "<none>" : s;
+    }
+
+    private Button button(String label) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        return b;
     }
 
     private TextView text(String value, int sp, boolean bold) {
