@@ -145,9 +145,12 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     }
 
     private boolean targetMatches() {
-        String target = AppState.getTarget(this);
         String foreground = AppState.getForeground(this);
-        return target != null && !target.isEmpty() && target.equals(foreground);
+        boolean match = AppState.WINDOWS_APP_PACKAGE.equals(foreground);
+        if (match) {
+            AppState.setTarget(this, AppState.WINDOWS_APP_PACKAGE);
+        }
+        return match;
     }
 
     private void updateDetection(KeyEvent event) {
