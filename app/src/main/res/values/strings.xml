@@ -1,5 +1,3 @@
 <resources>
-    <string name="app_name">DexKeyBridge</string>
-    <string name="accessibility_service_description">Detects physical keyboard events in Samsung DeX for Windows App remapping.</string>
-    <string name="ime_name">DexKeyBridge IME</string>
+    <string name="app_name">DexKeyBridge Lite</string>
 </resources>
