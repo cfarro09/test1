@@ -8,12 +8,13 @@ import android.view.inputmethod.InputConnection;
 
 public class DexKeyboardImeService extends InputMethodService {
     private static volatile DexKeyboardImeService instance;
-    private static volatile long suppressUntilMs = 0L;
 
     private static final int SCAN_SHIFT_LEFT = 42;
     private static final int SCAN_CTRL_LEFT = 29;
     private static final int SCAN_ALT_LEFT = 56;
     private static final int SCAN_META_LEFT = 125;
+    private static final int BRIDGE_EVENT_FLAGS =
+            KeyEvent.FLAG_FROM_SYSTEM | KeyEvent.FLAG_VIRTUAL_HARD_KEY;
 
     @Override
     public void onCreate() {
@@ -37,8 +38,83 @@ public class DexKeyboardImeService extends InputMethodService {
         return s != null && s.getCurrentInputConnection() != null;
     }
 
-    public static boolean shouldSuppressAccessibilityLoop() {
-        return SystemClock.uptimeMillis() < suppressUntilMs;
+    public static boolean isBridgeInjectedEvent(KeyEvent event) {
+        return event != null &&
+                (event.getFlags() & KeyEvent.FLAG_VIRTUAL_HARD_KEY) != 0;
+    }
+
+    public static boolean sendModifierEvent(
+            int action,
+            int keyCode,
+            int scanCode,
+            int deviceId,
+            int source,
+            int metaState) {
+
+        DexKeyboardImeService s = instance;
+        if (s == null) return false;
+
+        InputConnection ic = s.getCurrentInputConnection();
+        if (ic == null) {
+            outputFail(s);
+            return false;
+        }
+
+        long now = SystemClock.uptimeMillis();
+        boolean ok = send(
+                ic,
+                now,
+                action,
+                keyCode,
+                metaState,
+                deviceId,
+                scanCode,
+                source
+        );
+
+        AppState.setLastInjection(s, ok ? "RAW MODIFIER TRUE" : "RAW MODIFIER FALSE");
+        AppState.appendLog(s,
+                "OUTPUT MODIFIER " +
+                (action == KeyEvent.ACTION_DOWN ? "DOWN " : "UP ") +
+                KeyEvent.keyCodeToString(keyCode) +
+                " scan=" + scanCode +
+                " meta=0x" + Integer.toHexString(metaState) +
+                " result=" + ok);
+        return ok;
+    }
+
+    public static boolean sendKeyPairWithMeta(
+            int keyCode,
+            int scanCode,
+            int deviceId,
+            int source,
+            int metaState) {
+
+        DexKeyboardImeService s = instance;
+        if (s == null) return false;
+
+        InputConnection ic = s.getCurrentInputConnection();
+        if (ic == null) {
+            outputFail(s);
+            return false;
+        }
+
+        long downTime = SystemClock.uptimeMillis();
+        boolean ok = true;
+        ok &= send(ic, downTime, KeyEvent.ACTION_DOWN, keyCode, metaState,
+                deviceId, scanCode, source);
+        ok &= send(ic, downTime, KeyEvent.ACTION_UP, keyCode, metaState,
+                deviceId, scanCode, source);
+
+        AppState.setLastInjection(s, ok ? "RAW KEY TRUE" : "RAW KEY FALSE");
+        AppState.appendLog(s,
+                "OUTPUT HELD-MOD KEY " + KeyEvent.keyCodeToString(keyCode) +
+                " scan=" + scanCode +
+                " device=" + deviceId +
+                " source=0x" + Integer.toHexString(source) +
+                " meta=0x" + Integer.toHexString(metaState) +
+                " result=" + ok);
+        return ok;
     }
 
     public static boolean sendScancodeCombo(
@@ -56,12 +132,10 @@ public class DexKeyboardImeService extends InputMethodService {
 
         InputConnection ic = s.getCurrentInputConnection();
         if (ic == null) {
-            AppState.setLastInjection(s, "NO INPUT CONNECTION");
-            AppState.appendLog(s, "OUTPUT FAIL: no InputConnection");
+            outputFail(s);
             return false;
         }
 
-        suppressUntilMs = SystemClock.uptimeMillis() + 600L;
         long downTime = SystemClock.uptimeMillis();
         boolean ok = true;
 
@@ -94,8 +168,7 @@ public class DexKeyboardImeService extends InputMethodService {
         if (ctrl) ok &= send(ic, downTime, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT,
                 0, deviceId, SCAN_CTRL_LEFT, source);
 
-        String result = ok ? "SCANCODE TRUE" : "SCANCODE FALSE";
-        AppState.setLastInjection(s, result);
+        AppState.setLastInjection(s, ok ? "SCANCODE TRUE" : "SCANCODE FALSE");
         AppState.appendLog(s,
                 "OUTPUT SCANCODE key=" + KeyEvent.keyCodeToString(keyCode) +
                 " scan=" + scanCode +
@@ -107,6 +180,11 @@ public class DexKeyboardImeService extends InputMethodService {
                 " meta=" + meta +
                 " result=" + ok);
         return ok;
+    }
+
+    private static void outputFail(DexKeyboardImeService s) {
+        AppState.setLastInjection(s, "NO INPUT CONNECTION");
+        AppState.appendLog(s, "OUTPUT FAIL: no InputConnection");
     }
 
     private static int mods(boolean shift, boolean alt, boolean ctrl, boolean meta) {
@@ -140,7 +218,7 @@ public class DexKeyboardImeService extends InputMethodService {
                 metaState,
                 deviceId,
                 scanCode,
-                KeyEvent.FLAG_FROM_SYSTEM,
+                BRIDGE_EVENT_FLAGS,
                 actualSource
         );
         return ic.sendKeyEvent(event);
