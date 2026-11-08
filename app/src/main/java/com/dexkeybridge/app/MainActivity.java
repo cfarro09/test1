@@ -47,8 +47,8 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = text(
-                "v4 — misma app.\n" +
-                "BLOQUEAR DEX ahora funciona globalmente y no depende del paquete de Windows App.",
+                "v5 — misma app.\n" +
+                "Windows App se detecta automáticamente como com.microsoft.rdc.androidx.",
                 14, false);
         subtitle.setTextColor(Color.LTGRAY);
         subtitle.setPadding(0, dp(6), 0, dp(14));
@@ -118,7 +118,7 @@ public class MainActivity extends Activity {
                 "3. Prueba Win+E y Alt+Tab.\n" +
                 "4. Vuelve aquí y busca BLOCK GLOBAL / CONSUME en el log.\n\n" +
                 "Si DeX ya no cambia de ventana, el bloqueo está resuelto.\n" +
-                "Después pulsa 'Usar última app externa como TARGET', habilita el Keyboard Bridge y probamos ENVIAR AL TARGET.",
+                "Después habilita el Keyboard Bridge, selecciona ENVIAR AL TARGET y prueba Win+E / Alt+Tab dentro de Windows App.",
                 14, false);
         root.addView(instructions);
 
