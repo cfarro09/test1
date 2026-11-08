@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">DexKeyBridge Lite</string>
+    <string name="accessibility_service_description">Legacy diagnostic resource, not used by Lite build.</string>
+    <string name="ime_name">DexKeyBridge Lite</string>
 </resources>
