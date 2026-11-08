@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: dexkeybridge-apk-main
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,19 +22,31 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Restore stable debug signing key
+      - name: Restore stable DexKeyBridge signing key
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: dexkeybridge-debug-keystore-v1
+          path: .signing/dexkeybridge.keystore
+          key: dexkeybridge-stable-signing-v1
 
-      - name: Create debug signing key if missing
+      - name: Create stable signing key if missing
         shell: bash
         run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -v               -keystore "$HOME/.android/debug.keystore"               -storepass android               -alias androiddebugkey               -keypass android               -dname "CN=DexKeyBridge Debug,O=DexKeyBridge,C=PE"               -keyalg RSA               -keysize 2048               -validity 10000
+          mkdir -p .signing
+          if [ ! -f .signing/dexkeybridge.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore .signing/dexkeybridge.keystore \
+              -storepass dexkeybridge123 \
+              -alias dexkeybridge \
+              -keypass dexkeybridge123 \
+              -dname "CN=DexKeyBridge Stable,O=DexKeyBridge,C=PE" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
           fi
+          keytool -list -v \
+            -keystore .signing/dexkeybridge.keystore \
+            -storepass dexkeybridge123 \
+            -alias dexkeybridge | grep -E "Owner:|SHA256:"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -46,13 +62,16 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Verify APK signing
+      - name: Verify APK signing and certificate
         shell: bash
         run: |
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify \
+            --verbose \
+            --print-certs \
+            app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DexKeyBridge-v3-apk
+          name: DexKeyBridge-v11-apk
           path: app/build/outputs/apk/debug/app-debug.apk
