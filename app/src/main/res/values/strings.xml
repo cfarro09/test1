@@ -1,5 +1,4 @@
 <resources>
-    <string name="app_name">DexKeyBridge Lite</string>
-    <string name="accessibility_service_description">Legacy diagnostic resource, not used by Lite build.</string>
-    <string name="ime_name">DexKeyBridge Lite</string>
+    <string name="app_name">DexKeyBridge Diagnostic v2</string>
+    <string name="accessibility_service_description">Diagnostic service that checks whether Samsung DeX exposes Win/Meta and Alt+Tab key events. It does not inject keys and does not use Internet.</string>
 </resources>
