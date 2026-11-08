@@ -20,20 +20,24 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-
         AccessibilityServiceInfo info = getServiceInfo();
         if (info != null) {
             info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
             setServiceInfo(info);
         }
-
-        AppState.appendLog(this, "ACCESSIBILITY CONNECTED");
+        AppState.appendLog(this, "ACCESSIBILITY CONNECTED v4");
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
-        AppState.setForeground(this, event.getPackageName().toString());
+        String pkg = event.getPackageName().toString();
+
+        // Preserve the last external foreground package so returning to DexKeyBridge
+        // doesn't erase the package we actually want to target.
+        if (!getPackageName().equals(pkg)) {
+            AppState.setForeground(this, pkg);
+        }
     }
 
     @Override
@@ -44,10 +48,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
         if (event == null) return false;
-
-        if (DexKeyboardImeService.shouldSuppressAccessibilityLoop()) {
-            return false;
-        }
+        if (DexKeyboardImeService.shouldSuppressAccessibilityLoop()) return false;
 
         updateDetection(event);
         logInteresting(event);
@@ -61,28 +62,20 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 metaHeld = true;
                 metaComboTriggered = false;
             } else if (up) {
-                boolean shouldSendStart =
-                        AppState.getMode(this) == AppState.MODE_FORWARD &&
-                        isWindowsAppForeground() &&
-                        !metaComboTriggered;
-
-                if (shouldSendStart) {
+                if (AppState.getMode(this) == AppState.MODE_FORWARD &&
+                    targetMatches() &&
+                    !metaComboTriggered) {
                     boolean ok = DexKeyboardImeService.sendCombo(
-                            KeyEvent.KEYCODE_ESCAPE,
-                            false,
-                            false,
-                            true,
-                            false
-                    );
+                            KeyEvent.KEYCODE_ESCAPE, false, false, true, false);
                     AppState.appendLog(this, "FORWARD META alone -> CTRL+ESC result=" + ok);
                 }
-
                 metaHeld = false;
                 metaComboTriggered = false;
             }
 
-            if (shouldOwnShortcut()) {
-                AppState.appendLog(this, "CONSUME " + KeyEvent.keyCodeToString(code));
+            if (shouldConsumeNow()) {
+                AppState.appendLog(this, "CONSUME " + KeyEvent.keyCodeToString(code) +
+                        " mode=" + AppState.getMode(this));
                 return true;
             }
             return false;
@@ -90,78 +83,80 @@ public class KeyboardAccessibilityService extends AccessibilityService {
 
         updateModifierState(code, down, up);
 
-        if (!shouldOwnShortcut()) {
-            return false;
-        }
+        if (!shouldConsumeNow()) return false;
 
         int mode = AppState.getMode(this);
 
-        // Keep DeX from seeing modifier changes while a Win/Meta sequence is active.
         if (metaHeld && isModifier(code)) {
+            AppState.appendLog(this, "CONSUME modifier during META: " + KeyEvent.keyCodeToString(code));
             return true;
         }
 
-        // Generic Win/Meta shortcut forwarding: Win+E, Win+R, Win+D, Win+Shift+S, etc.
         if (metaHeld && !isModifier(code)) {
             metaComboTriggered = true;
 
-            if (mode == AppState.MODE_FORWARD && down && event.getRepeatCount() == 0) {
-                boolean ok = DexKeyboardImeService.sendCombo(
-                        code,
-                        shiftHeld || event.isShiftPressed(),
-                        altHeld || event.isAltPressed(),
-                        ctrlHeld || event.isCtrlPressed(),
-                        true
-                );
-                AppState.appendLog(this,
-                        "FORWARD META+" + KeyEvent.keyCodeToString(code) + " result=" + ok);
-            } else if (mode == AppState.MODE_BLOCK && down && event.getRepeatCount() == 0) {
-                AppState.appendLog(this,
-                        "BLOCK META+" + KeyEvent.keyCodeToString(code));
+            if (down && event.getRepeatCount() == 0) {
+                if (mode == AppState.MODE_BLOCK) {
+                    AppState.appendLog(this, "BLOCK GLOBAL META+" + KeyEvent.keyCodeToString(code));
+                } else if (mode == AppState.MODE_FORWARD) {
+                    boolean ok = DexKeyboardImeService.sendCombo(
+                            code,
+                            shiftHeld || event.isShiftPressed(),
+                            altHeld || event.isAltPressed(),
+                            ctrlHeld || event.isCtrlPressed(),
+                            true
+                    );
+                    AppState.appendLog(this, "FORWARD META+" +
+                            KeyEvent.keyCodeToString(code) + " result=" + ok);
+                }
             }
-
             return true;
         }
 
-        // Alt+Tab is special: consume TAB while ALT is physically held.
         if (code == KeyEvent.KEYCODE_TAB && (altHeld || event.isAltPressed())) {
-            if (mode == AppState.MODE_FORWARD && down && event.getRepeatCount() == 0) {
-                boolean ok = DexKeyboardImeService.sendCombo(
-                        KeyEvent.KEYCODE_PAGE_UP,
-                        false,
-                        true,
-                        false,
-                        false
-                );
-                AppState.appendLog(this, "FORWARD ALT+TAB -> ALT+PAGE_UP result=" + ok);
-            } else if (mode == AppState.MODE_BLOCK && down && event.getRepeatCount() == 0) {
-                AppState.appendLog(this, "BLOCK ALT+TAB");
+            if (down && event.getRepeatCount() == 0) {
+                if (mode == AppState.MODE_BLOCK) {
+                    AppState.appendLog(this, "BLOCK GLOBAL ALT+TAB");
+                } else if (mode == AppState.MODE_FORWARD) {
+                    boolean ok = DexKeyboardImeService.sendCombo(
+                            KeyEvent.KEYCODE_PAGE_UP, false, true, false, false);
+                    AppState.appendLog(this, "FORWARD ALT+TAB -> ALT+PAGE_UP result=" + ok);
+                }
             }
+            return true;
+        }
 
+        // In global block mode, consume ALT while held so DeX cannot see the full sequence.
+        if (mode == AppState.MODE_BLOCK &&
+            (code == KeyEvent.KEYCODE_ALT_LEFT || code == KeyEvent.KEYCODE_ALT_RIGHT)) {
+            AppState.appendLog(this, "CONSUME ALT GLOBAL");
             return true;
         }
 
         return false;
     }
 
-    private boolean shouldOwnShortcut() {
+    private boolean shouldConsumeNow() {
         int mode = AppState.getMode(this);
-        return mode != AppState.MODE_OBSERVE && isWindowsAppForeground();
+        if (mode == AppState.MODE_BLOCK) {
+            return true; // v4 diagnostic: global block, independent of app package.
+        }
+        return mode == AppState.MODE_FORWARD && targetMatches();
     }
 
-    private boolean isWindowsAppForeground() {
-        return AppState.WINDOWS_APP_PACKAGE.equals(AppState.getForeground(this));
+    private boolean targetMatches() {
+        String target = AppState.getTarget(this);
+        String foreground = AppState.getForeground(this);
+        return target != null && !target.isEmpty() && target.equals(foreground);
     }
 
     private void updateDetection(KeyEvent event) {
         int code = event.getKeyCode();
-
         if (code == KeyEvent.KEYCODE_META_LEFT ||
             code == KeyEvent.KEYCODE_META_RIGHT ||
             event.isMetaPressed()) {
             AppState.setMetaDetected(this, true);
         }
-
         if (code == KeyEvent.KEYCODE_TAB && event.isAltPressed()) {
             AppState.setAltTabDetected(this, true);
         }
@@ -193,8 +188,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
 
     private void logInteresting(KeyEvent e) {
         int c = e.getKeyCode();
-        boolean interesting =
-                isModifier(c) ||
+        boolean interesting = isModifier(c) ||
                 c == KeyEvent.KEYCODE_TAB ||
                 e.isMetaPressed() ||
                 e.isAltPressed() ||
@@ -204,19 +198,15 @@ public class KeyboardAccessibilityService extends AccessibilityService {
 
         InputDevice d = InputDevice.getDevice(e.getDeviceId());
         String device = d == null ? "unknown" : d.getName();
-        int vendor = d == null ? -1 : d.getVendorId();
-        int product = d == null ? -1 : d.getProductId();
 
-        String action;
-        if (e.getAction() == KeyEvent.ACTION_DOWN) action = "DOWN";
-        else if (e.getAction() == KeyEvent.ACTION_UP) action = "UP";
-        else action = String.valueOf(e.getAction());
+        String action = e.getAction() == KeyEvent.ACTION_DOWN ? "DOWN" :
+                e.getAction() == KeyEvent.ACTION_UP ? "UP" :
+                String.valueOf(e.getAction());
 
         String time = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
 
         AppState.appendLog(this,
-                time +
-                " " + action +
+                time + " " + action +
                 " key=" + KeyEvent.keyCodeToString(c) +
                 " code=" + c +
                 " scan=" + e.getScanCode() +
@@ -225,8 +215,9 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 " CTRL=" + e.isCtrlPressed() +
                 " ALT=" + e.isAltPressed() +
                 " SHIFT=" + e.isShiftPressed() + "]" +
-                " device=\"" + device + "\"" +
-                " vendor=" + vendor +
-                " product=" + product);
+                " mode=" + AppState.getMode(this) +
+                " fg=" + AppState.getForeground(this) +
+                " target=" + AppState.getTarget(this) +
+                " device=\"" + device + "\"");
     }
 }

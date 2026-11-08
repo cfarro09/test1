@@ -18,17 +18,16 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
-
     private TextView status;
     private TextView modeStatus;
     private TextView logView;
 
     private final Runnable refresher = new Runnable() {
-        @Override
-        public void run() {
+        @Override public void run() {
             refresh();
             handler.postDelayed(this, 500);
         }
@@ -48,11 +47,9 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = text(
-                "v3 experimental — misma app.\n" +
-                "Intercepta atajos del K380s solo cuando Microsoft Windows App está al frente.",
-                14,
-                false
-        );
+                "v4 — misma app.\n" +
+                "BLOQUEAR DEX ahora funciona globalmente y no depende del paquete de Windows App.",
+                14, false);
         subtitle.setTextColor(Color.LTGRAY);
         subtitle.setPadding(0, dp(6), 0, dp(14));
         root.addView(subtitle);
@@ -65,21 +62,31 @@ public class MainActivity extends Activity {
         modeStatus.setPadding(0, dp(12), 0, dp(8));
         root.addView(modeStatus);
 
-        Button observe = button("Modo 1: OBSERVAR (no bloquea nada)");
+        Button observe = button("Modo 1: OBSERVAR");
         observe.setOnClickListener(v -> {
             AppState.setMode(this, AppState.MODE_OBSERVE);
             refresh();
         });
         root.addView(observe);
 
-        Button block = button("Modo 2: BLOQUEAR DEX (prueba)");
+        Button block = button("Modo 2: BLOQUEAR DEX GLOBAL");
         block.setOnClickListener(v -> {
             AppState.setMode(this, AppState.MODE_BLOCK);
+            Toast.makeText(this, "Bloqueo global activo", Toast.LENGTH_SHORT).show();
             refresh();
         });
         root.addView(block);
 
-        Button forward = button("Modo 3: ENVIAR A WINDOWS (experimental)");
+        Button capture = button("Usar última app externa como TARGET");
+        capture.setOnClickListener(v -> {
+            String fg = AppState.getForeground(this);
+            AppState.setTarget(this, fg);
+            Toast.makeText(this, "Target: " + fg, Toast.LENGTH_LONG).show();
+            refresh();
+        });
+        root.addView(capture);
+
+        Button forward = button("Modo 3: ENVIAR AL TARGET");
         forward.setOnClickListener(v -> {
             AppState.setMode(this, AppState.MODE_FORWARD);
             refresh();
@@ -104,30 +111,15 @@ public class MainActivity extends Activity {
         });
         root.addView(imePicker);
 
-        Button openWindows = button("Abrir Microsoft Windows App");
-        openWindows.setOnClickListener(v -> {
-            Intent launch = getPackageManager().getLaunchIntentForPackage(AppState.WINDOWS_APP_PACKAGE);
-            if (launch != null) {
-                startActivity(launch);
-            }
-        });
-        root.addView(openWindows);
-
         TextView instructions = text(
-                "\nPRUEBA A — BLOQUEAR DEX\n" +
-                "1. Selecciona BLOQUEAR DEX.\n" +
-                "2. Abre Windows App y entra a tu PC.\n" +
-                "3. Prueba Win, Win+E y Alt+Tab.\n" +
-                "4. DeX no debería ejecutar esos atajos.\n\n" +
-                "PRUEBA B — ENVIAR A WINDOWS\n" +
-                "1. Habilita y selecciona DexKeyBridge Keyboard Bridge.\n" +
-                "2. Selecciona ENVIAR A WINDOWS.\n" +
-                "3. En Windows App prueba Win+E y Alt+Tab.\n" +
-                "4. Win+E intenta llegar como Win+E; Alt+Tab se envía como Alt+PageUp.\n\n" +
-                "Si InputConnection sale UNAVAILABLE, Android no nos está dando un canal público de inyección hacia Windows App.",
-                14,
-                false
-        );
+                "\nPRUEBA AHORA\n" +
+                "1. Activa BLOQUEAR DEX GLOBAL.\n" +
+                "2. Sal de la app y entra a Windows App.\n" +
+                "3. Prueba Win+E y Alt+Tab.\n" +
+                "4. Vuelve aquí y busca BLOCK GLOBAL / CONSUME en el log.\n\n" +
+                "Si DeX ya no cambia de ventana, el bloqueo está resuelto.\n" +
+                "Después pulsa 'Usar última app externa como TARGET', habilita el Keyboard Bridge y probamos ENVIAR AL TARGET.",
+                14, false);
         root.addView(instructions);
 
         Button clear = button("Limpiar log");
@@ -143,9 +135,8 @@ public class MainActivity extends Activity {
             ClipboardManager cm =
                     (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) {
-                cm.setPrimaryClip(
-                        ClipData.newPlainText("DexKeyBridge log", AppState.getLog(this))
-                );
+                cm.setPrimaryClip(ClipData.newPlainText(
+                        "DexKeyBridge log", AppState.getLog(this)));
             }
         });
         root.addView(copy);
@@ -159,38 +150,32 @@ public class MainActivity extends Activity {
         setContentView(scroll);
     }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
         handler.post(refresher);
     }
 
-    @Override
-    protected void onPause() {
+    @Override protected void onPause() {
         super.onPause();
         handler.removeCallbacks(refresher);
     }
 
     private void refresh() {
         int mode = AppState.getMode(this);
-        String modeName =
-                mode == AppState.MODE_BLOCK ? "BLOQUEAR DEX" :
-                mode == AppState.MODE_FORWARD ? "ENVIAR A WINDOWS" :
-                "OBSERVAR";
+        String modeName = mode == AppState.MODE_BLOCK ? "BLOQUEAR DEX GLOBAL" :
+                mode == AppState.MODE_FORWARD ? "ENVIAR AL TARGET" : "OBSERVAR";
 
         modeStatus.setText("MODO: " + modeName);
         modeStatus.setTextColor(
                 mode == AppState.MODE_FORWARD ? Color.GREEN :
-                mode == AppState.MODE_BLOCK ? Color.YELLOW :
-                Color.LTGRAY
-        );
+                mode == AppState.MODE_BLOCK ? Color.YELLOW : Color.LTGRAY);
 
         status.setText(
-                "Accessibility: " + (isAccessibilityEnabled() ? "ENABLED" : "DISABLED") + "\n" +
+                "Accessibility:  " + (isAccessibilityEnabled() ? "ENABLED" : "DISABLED") + "\n" +
                 "IME service:    " + (DexKeyboardImeService.isServiceAlive() ? "ALIVE" : "NOT ACTIVE") + "\n" +
                 "InputConnection:" + (DexKeyboardImeService.hasInputConnection() ? " AVAILABLE" : " UNAVAILABLE") + "\n" +
-                "Foreground:     " + empty(AppState.getForeground(this)) + "\n" +
-                "Target:         " + AppState.WINDOWS_APP_PACKAGE + "\n" +
+                "Last external:  " + empty(AppState.getForeground(this)) + "\n" +
+                "Target:         " + empty(AppState.getTarget(this)) + "\n" +
                 "META detected:  " + (AppState.isMetaDetected(this) ? "YES" : "NO") + "\n" +
                 "Alt+Tab seen:   " + (AppState.isAltTabDetected(this) ? "YES" : "NO") + "\n" +
                 "Last injection: " + AppState.getLastInjection(this)
@@ -202,20 +187,16 @@ public class MainActivity extends Activity {
     private boolean isAccessibilityEnabled() {
         String enabled = Settings.Secure.getString(
                 getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        );
-
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (enabled == null) return false;
 
         ComponentName me = new ComponentName(this, KeyboardAccessibilityService.class);
         TextUtils.SimpleStringSplitter splitter = new TextUtils.SimpleStringSplitter(':');
         splitter.setString(enabled);
-
         while (splitter.hasNext()) {
             ComponentName cn = ComponentName.unflattenFromString(splitter.next());
             if (me.equals(cn)) return true;
         }
-
         return false;
     }
 

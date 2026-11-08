@@ -8,16 +8,15 @@ public final class AppState {
     public static final int MODE_BLOCK = 1;
     public static final int MODE_FORWARD = 2;
 
-    public static final String WINDOWS_APP_PACKAGE = "com.microsoft.rdc.androidx";
-
     private static final String PREFS = "dex_key_bridge";
     private static final String KEY_LOG = "event_log";
     private static final String KEY_FOREGROUND = "foreground_package";
+    private static final String KEY_TARGET = "target_package";
     private static final String KEY_MODE = "bridge_mode";
     private static final String KEY_META_DETECTED = "meta_detected";
     private static final String KEY_ALT_TAB_DETECTED = "alt_tab_detected";
     private static final String KEY_LAST_INJECTION = "last_injection";
-    private static final int MAX_LOG_CHARS = 32000;
+    private static final int MAX_LOG_CHARS = 36000;
 
     private AppState() {}
 
@@ -43,6 +42,13 @@ public final class AppState {
     }
     public static String getForeground(Context c) {
         return prefs(c).getString(KEY_FOREGROUND, "");
+    }
+
+    public static void setTarget(Context c, String pkg) {
+        prefs(c).edit().putString(KEY_TARGET, pkg == null ? "" : pkg).apply();
+    }
+    public static String getTarget(Context c) {
+        return prefs(c).getString(KEY_TARGET, "");
     }
 
     public static void setMode(Context c, int mode) {
