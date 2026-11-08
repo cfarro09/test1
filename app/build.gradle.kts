@@ -10,11 +10,23 @@ android {
         applicationId = "com.dexkeybridge.diagnosticv2"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.1.0"
+        versionCode = 12
+        versionName = "1.2.0"
+    }
+
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = rootProject.file(".signing/dexkeybridge.keystore")
+            storePassword = "dexkeybridge123"
+            keyAlias = "dexkeybridge"
+            keyPassword = "dexkeybridge123"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("stableDebug")
+        }
         release {
             isMinifyEnabled = false
         }
