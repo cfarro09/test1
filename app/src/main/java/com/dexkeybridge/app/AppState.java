@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 public final class AppState {
+    public static final String WINDOWS_APP_PACKAGE = "com.microsoft.rdc.androidx";
     public static final int MODE_OBSERVE = 0;
     public static final int MODE_BLOCK = 1;
     public static final int MODE_FORWARD = 2;
@@ -48,7 +49,7 @@ public final class AppState {
         prefs(c).edit().putString(KEY_TARGET, pkg == null ? "" : pkg).apply();
     }
     public static String getTarget(Context c) {
-        return prefs(c).getString(KEY_TARGET, "");
+        return prefs(c).getString(KEY_TARGET, WINDOWS_APP_PACKAGE);
     }
 
     public static void setMode(Context c, int mode) {
