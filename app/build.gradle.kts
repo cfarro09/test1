@@ -7,11 +7,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.dexkeybridge.lite"
+        applicationId = "com.dexkeybridge.diagnosticv2"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-lite"
+        versionCode = 3
+        versionName = "0.3.0-diagnostic-v2"
     }
 
     buildTypes {
