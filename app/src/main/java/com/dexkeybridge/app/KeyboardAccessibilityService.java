@@ -19,6 +19,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     private boolean remoteAltDown = false;
     private int altDeviceId = KeyEvent.KEYCODE_UNKNOWN;
     private int altSource = InputDevice.SOURCE_KEYBOARD;
+    private boolean windowsKeyboardSessionActive = false;
 
     @Override
     protected void onServiceConnected() {
@@ -29,15 +30,48 @@ public class KeyboardAccessibilityService extends AccessibilityService {
             setServiceInfo(info);
         }
         resetPhysicalState("SERVICE CONNECTED");
-        AppState.appendLog(this, "ACCESSIBILITY CONNECTED v11");
+        String lastFg = AppState.getForeground(this);
+        boolean persisted = AppState.isWindowsSessionActive(this);
+        windowsKeyboardSessionActive =
+                AppState.WINDOWS_APP_PACKAGE.equals(lastFg) ||
+                (persisted && isTransientSystemPackage(lastFg));
+        AppState.setWindowsSessionActive(this, windowsKeyboardSessionActive);
+        AppState.appendLog(this,
+                "ACCESSIBILITY CONNECTED v12 windowsSession=" +
+                windowsKeyboardSessionActive);
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null || event.getPackageName() == null) return;
+
         String pkg = event.getPackageName().toString();
-        if (!getPackageName().equals(pkg)) {
-            AppState.setForeground(this, pkg);
+        if (getPackageName().equals(pkg)) return;
+
+        AppState.setForeground(this, pkg);
+
+        // Any event from Windows App confirms the session is active.
+        if (AppState.WINDOWS_APP_PACKAGE.equals(pkg)) {
+            setWindowsKeyboardSession(true, "WINDOWS APP ACTIVE");
+            return;
+        }
+
+        // Samsung DeX briefly reports SystemUI/launcher while Windows App is still
+        // the user's working surface. Never drop the keyboard bridge for those.
+        if (isTransientSystemPackage(pkg)) {
+            if (windowsKeyboardSessionActive) {
+                AppState.appendLog(this,
+                        "WINDOWS SESSION KEEP through transient pkg=" + pkg);
+            }
+            return;
+        }
+
+        // Only a real foreground-window transition to another app ends the session.
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            windowsKeyboardSessionActive) {
+            releaseRemoteAltIfNeeded("LEFT WINDOWS TO " + pkg);
+            resetPhysicalState("LEFT WINDOWS TO " + pkg);
+            setWindowsKeyboardSession(false, "REAL APP " + pkg);
         }
     }
 
@@ -253,12 +287,26 @@ public class KeyboardAccessibilityService extends AccessibilityService {
     }
 
     private boolean targetMatches() {
-        String foreground = AppState.getForeground(this);
-        boolean match = AppState.WINDOWS_APP_PACKAGE.equals(foreground);
-        if (match) {
+        if (windowsKeyboardSessionActive) {
             AppState.setTarget(this, AppState.WINDOWS_APP_PACKAGE);
         }
-        return match;
+        return windowsKeyboardSessionActive;
+    }
+
+    private void setWindowsKeyboardSession(boolean active, String reason) {
+        if (windowsKeyboardSessionActive == active) return;
+        windowsKeyboardSessionActive = active;
+        AppState.setWindowsSessionActive(this, active);
+        AppState.appendLog(this,
+                "WINDOWS KEYBOARD SESSION " + (active ? "ON" : "OFF") +
+                " reason=" + reason);
+    }
+
+    private boolean isTransientSystemPackage(String pkg) {
+        return "com.android.systemui".equals(pkg) ||
+               "com.sec.android.app.launcher".equals(pkg) ||
+               "com.samsung.android.app.desktoplauncher".equals(pkg) ||
+               "com.android.launcher3".equals(pkg);
     }
 
     private void updateDetection(KeyEvent event) {
@@ -333,6 +381,7 @@ public class KeyboardAccessibilityService extends AccessibilityService {
                 " altPhysical=" + altPhysicalDown +
                 " altOwned=" + altSequenceOwned +
                 " remoteAlt=" + remoteAltDown +
+                " winSession=" + windowsKeyboardSessionActive +
                 " device=\"" + device + "\"");
     }
 }
