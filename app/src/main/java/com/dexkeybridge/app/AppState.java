@@ -57,7 +57,7 @@ public final class AppState {
         prefs(c).edit().putInt(KEY_MODE, mode).apply();
     }
     public static int getMode(Context c) {
-        return prefs(c).getInt(KEY_MODE, MODE_OBSERVE);
+        return prefs(c).getInt(KEY_MODE, MODE_FORWARD);
     }
 
     public static void setMetaDetected(Context c, boolean v) {
