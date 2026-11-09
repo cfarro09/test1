@@ -47,8 +47,8 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = text(
-                "v5 — misma app.\n" +
-                "Windows App se detecta automáticamente como com.microsoft.rdc.androidx.",
+                "v12 — Windows keyboard mode persistente.\n" +
+                "SystemUI/launcher ya no cortan los atajos remotos.",
                 14, false);
         subtitle.setTextColor(Color.LTGRAY);
         subtitle.setPadding(0, dp(6), 0, dp(14));
@@ -175,6 +175,7 @@ public class MainActivity extends Activity {
                 "IME service:    " + (DexKeyboardImeService.isServiceAlive() ? "ALIVE" : "NOT ACTIVE") + "\n" +
                 "InputConnection:" + (DexKeyboardImeService.hasInputConnection() ? " AVAILABLE" : " UNAVAILABLE") + "\n" +
                 "Last external:  " + empty(AppState.getForeground(this)) + "\n" +
+                "Windows session: " + (AppState.isWindowsSessionActive(this) ? "ON" : "OFF") + "\n" +
                 "Target:         " + empty(AppState.getTarget(this)) + "\n" +
                 "META detected:  " + (AppState.isMetaDetected(this) ? "YES" : "NO") + "\n" +
                 "Alt+Tab seen:   " + (AppState.isAltTabDetected(this) ? "YES" : "NO") + "\n" +
