@@ -17,6 +17,7 @@ public final class AppState {
     private static final String KEY_META_DETECTED = "meta_detected";
     private static final String KEY_ALT_TAB_DETECTED = "alt_tab_detected";
     private static final String KEY_LAST_INJECTION = "last_injection";
+    private static final String KEY_WINDOWS_SESSION_ACTIVE = "windows_session_active";
     private static final int MAX_LOG_CHARS = 36000;
 
     private AppState() {}
@@ -78,5 +79,12 @@ public final class AppState {
     }
     public static String getLastInjection(Context c) {
         return prefs(c).getString(KEY_LAST_INJECTION, "NOT TESTED");
+    }
+
+    public static void setWindowsSessionActive(Context c, boolean v) {
+        prefs(c).edit().putBoolean(KEY_WINDOWS_SESSION_ACTIVE, v).apply();
+    }
+    public static boolean isWindowsSessionActive(Context c) {
+        return prefs(c).getBoolean(KEY_WINDOWS_SESSION_ACTIVE, false);
     }
 }
